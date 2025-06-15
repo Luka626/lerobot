@@ -58,13 +58,15 @@ from lerobot.common.utils.robot_utils import busy_wait
 from lerobot.common.utils.utils import init_logging, move_cursor_up
 from lerobot.common.utils.visualization_utils import _init_rerun
 
-from .common.teleoperators import gamepad, koch_leader, so100_leader, so101_leader  # noqa: F401
+from .common.teleoperators import koch_leader, so100_leader, so101_leader  # noqa: F401
 
 
 @dataclass
 class TeleoperateConfig:
-    teleop: TeleoperatorConfig
-    robot: RobotConfig
+    teleop_1: TeleoperatorConfig
+    teleop_2: TeleoperatorConfig
+    robot_1: RobotConfig
+    robot_2: RobotConfig
     # Limit the maximum frames per second.
     fps: int = 60
     teleop_time_s: float | None = None
@@ -73,25 +75,31 @@ class TeleoperateConfig:
 
 
 def teleop_loop(
-    teleop: Teleoperator, robot: Robot, fps: int, display_data: bool = False, duration: float | None = None
+    teleop_1: Teleoperator, teleop_2: Teleoperator, robot_1: Robot, robot_2: Robot, fps: int, display_data: bool = False, duration: float | None = None
 ):
-    display_len = max(len(key) for key in robot.action_features)
+    # display_len = max(len(key) for key in robot.action_features)
+    display_len = max(len(key) for robot in (robot_1, robot_2) for key in robot.action_features)
     start = time.perf_counter()
     while True:
         loop_start = time.perf_counter()
-        action = teleop.get_action()
+        action_1 = teleop_1.get_action()
+        action_2 = teleop_2.get_action()
+        actions = (action_1, action_2)
+        robots = (robot_1, robot_2)
         if display_data:
-            observation = robot.get_observation()
-            for obs, val in observation.items():
-                if isinstance(val, float):
-                    rr.log(f"observation_{obs}", rr.Scalar(val))
-                elif isinstance(val, np.ndarray):
-                    rr.log(f"observation_{obs}", rr.Image(val), static=True)
+            for robot,action in zip(robots, actions):
+                observation = robot.get_observation()
+                for obs, val in observation.items():
+                    if isinstance(val, float):
+                        rr.log(f"observation_{robot.id}_{obs}", rr.Scalar(val))
+                    elif isinstance(val, np.ndarray):
+                        rr.log(f"observation_{robot.id}_{obs}", rr.Image(val), static=True)
             for act, val in action.items():
                 if isinstance(val, float):
                     rr.log(f"action_{act}", rr.Scalar(val))
 
-        robot.send_action(action)
+        for robot, action in zip(robots, actions):
+            robot.send_action(action)
         dt_s = time.perf_counter() - loop_start
         busy_wait(1 / fps - dt_s)
 
@@ -116,22 +124,29 @@ def teleoperate(cfg: TeleoperateConfig):
     if cfg.display_data:
         _init_rerun(session_name="teleoperation")
 
-    teleop = make_teleoperator_from_config(cfg.teleop)
-    robot = make_robot_from_config(cfg.robot)
+    teleop_1 = make_teleoperator_from_config(cfg.teleop_1)
+    teleop_2 = make_teleoperator_from_config(cfg.teleop_2)
+    robot_1 = make_robot_from_config(cfg.robot_1)
+    robot_2 = make_robot_from_config(cfg.robot_2)
 
-    teleop.connect()
-    robot.connect()
+    teleop_1.connect()
+    teleop_2.connect()
+    robot_1.connect()
+    robot_2.connect()
 
     try:
-        teleop_loop(teleop, robot, cfg.fps, display_data=cfg.display_data, duration=cfg.teleop_time_s)
+        teleop_loop(teleop_1, teleop_2, robot_1, robot_2, cfg.fps, display_data=cfg.display_data, duration=cfg.teleop_time_s)
     except KeyboardInterrupt:
         pass
     finally:
         if cfg.display_data:
             rr.rerun_shutdown()
-        teleop.disconnect()
-        robot.disconnect()
+        teleop_1.disconnect()
+        teleop_2.disconnect()
+        robot_1.disconnect()
+        robot_2.disconnect()
 
 
 if __name__ == "__main__":
     teleoperate()
+
